@@ -108,6 +108,30 @@
   .note{font-size:12px;color:var(--ink2);margin-top:18px;line-height:1.55;border-top:1px solid var(--hair2);padding-top:14px}
   .note b{color:var(--ink)}
 
+  /* Save bar + comparison */
+  .savebar{display:flex;gap:8px;margin-top:18px;border-top:1px solid var(--hair2);padding-top:16px;flex-wrap:wrap}
+  .btn{font-family:var(--sans);font-size:13px;font-weight:700;letter-spacing:.02em;padding:10px 14px;border-radius:3px;cursor:pointer;border:1px solid var(--ink)}
+  .btn.primary{background:var(--ink);color:#fff}
+  .btn.ghost{background:#fff;color:var(--ink)}
+  .btn:hover{opacity:.88}
+  .editing-note{font-size:12px;color:var(--brass);font-weight:600;margin-top:10px;display:none}
+
+  .cmp{margin-top:26px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--hair);border-radius:4px;background:var(--surface)}
+  table.cmp-t{border-collapse:collapse;width:100%;font-size:13px}
+  table.cmp-t th,table.cmp-t td{padding:11px 14px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--hair2)}
+  table.cmp-t th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);font-weight:700;background:var(--surface)}
+  table.cmp-t th:first-child,table.cmp-t td:first-child{text-align:left}
+  table.cmp-t td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  table.cmp-t td.nm{font-family:var(--sans);font-weight:600}
+  table.cmp-t tbody tr:last-child td{border-bottom:none}
+  table.cmp-t tr.sel td{background:rgba(154,107,47,.09)}
+  table.cmp-t td.best{color:var(--equity);font-weight:700}
+  .rowact{display:flex;gap:6px;justify-content:flex-end}
+  .rowact button{font-family:var(--sans);font-size:12px;font-weight:600;padding:5px 9px;border-radius:3px;cursor:pointer;border:1px solid var(--hair);background:#fff;color:var(--ink2)}
+  .rowact button:hover{border-color:var(--ink);color:var(--ink)}
+  .cmp-empty{padding:28px;text-align:center;color:var(--ink2);font-size:13px}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -125,9 +149,25 @@
       <div class="panel-title">Inputs <span>edit any field</span></div>
 
       <div class="field">
+        <label for="uname">Unit name / label</label>
+        <input class="ipt" type="text" id="uname" placeholder="e.g. Oak St #4B" autocomplete="off">
+      </div>
+
+      <div class="field">
         <label for="price">Purchase price <span class="val" id="priceVal">$700,000</span></label>
         <div class="prefix"><span>$</span><input class="ipt" type="number" id="price" value="700000" min="100000" step="5000"></div>
         <input type="range" id="priceR" min="300000" max="1500000" step="5000" value="700000" aria-label="Purchase price slider">
+      </div>
+
+      <div class="field">
+        <label for="sqft">Square footage</label>
+        <input class="ipt" type="number" id="sqft" value="1100" min="0" step="10">
+        <div class="hint" id="ppsfHint">$636 per sq ft</div>
+      </div>
+
+      <div class="field">
+        <label for="year">Year built</label>
+        <input class="ipt" type="number" id="year" value="2018" min="1900" max="2030" step="1">
       </div>
 
       <div class="field">
@@ -177,6 +217,13 @@
         <input type="range" id="ret" min="0" max="12" step="0.5" value="7" aria-label="Expected investment return">
         <div class="hint">Used to value the forgone return on cash tied up in the down payment.</div>
       </div>
+
+      <div class="savebar">
+        <button class="btn primary" id="saveBtn" type="button">Add to comparison</button>
+        <button class="btn ghost" id="newBtn" type="button" style="display:none">Cancel</button>
+        <button class="btn ghost" id="xlsxBtn" type="button">Export to Excel</button>
+      </div>
+      <div class="editing-note" id="editNote"></div>
     </section>
 
     <!-- RESULTS -->
@@ -200,40 +247,55 @@
       </div>
     </section>
   </div>
+
+  <section class="panel cmp" aria-label="Saved units">
+    <div class="panel-title">Saved units <span id="cmpCount"></span></div>
+    <div id="cmpBody"></div>
+  </section>
 </div>
 
 <script>
 (function(){
   var $=function(id){return document.getElementById(id)};
   var fmt=function(n){return '$'+Math.round(n).toLocaleString('en-US')};
-  var fmt2=function(n){return '$'+n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})};
   var pct=function(n,d){return (100*n/d).toFixed(0)+'%'};
+  var esc=function(s){return String(s).replace(/[&<>"']/g,function(ch){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});};
+  var LS='condoCompareUnits.v1';
 
-  var state={price:700000,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,pmiRate:0.6};
+  var state={name:'',price:700000,sqft:1100,year:2018,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,pmiRate:0.6};
+  var units=[], editingId=null, seq=1;
+  try{var saved=JSON.parse(localStorage.getItem(LS));
+    if(saved&&saved.units){units=saved.units;seq=saved.seq||units.length+1;}}catch(e){}
+  function persist(){try{localStorage.setItem(LS,JSON.stringify({units:units,seq:seq}));}catch(e){}}
 
-  function calc(){
-    var loan=state.price*(1-state.dp/100);
-    var r=state.apr/100/12, n=state.term*12;
+  var FIELDS=['name','price','sqft','year','dp','term','apr','tax','ins','hoa','esc','ret','pmiRate'];
+
+  function calc(s){
+    s=s||state;
+    var loan=s.price*(1-s.dp/100);
+    var r=s.apr/100/12, n=s.term*12;
     var pi = r===0 ? loan/n : loan*r/(1-Math.pow(1+r,-n));
     var firstInterest=loan*r;
     var firstPrincipal=Math.max(0,pi-firstInterest);
-    var monTax=state.price*state.tax/100/12;
-    var monIns=state.ins/12;
-    var monHoa=state.hoa;
-    var monPmi=(state.dp<20)? loan*state.pmiRate/100/12 : 0;
+    var monTax=s.price*s.tax/100/12;
+    var monIns=s.ins/12;
+    var monHoa=s.hoa;
+    var monPmi=(s.dp<20)? loan*s.pmiRate/100/12 : 0;
     var total=pi+monTax+monIns+monHoa+monPmi;
     var sunk=firstInterest+monTax+monIns+monHoa+monPmi;
     var totalPaid=pi*n;
     var totalInterest=totalPaid-loan;
-    var forgoneMo=(state.price*state.dp/100)*state.ret/100/12;
+    var forgoneMo=(s.price*s.dp/100)*s.ret/100/12;
     var trueCost=total-firstPrincipal;
     // 10-yr projected HOA (and the rest held flat for a conservative single figure)
-    var hoa10=state.hoa*Math.pow(1+state.esc/100,10);
+    var hoa10=s.hoa*Math.pow(1+s.esc/100,10);
     var total10=pi+monTax+monIns+hoa10+monPmi;
+    var ppsf=s.sqft>0? s.price/s.sqft : 0;
     return {loan:loan,pi:pi,firstInterest:firstInterest,firstPrincipal:firstPrincipal,
       monTax:monTax,monIns:monIns,monHoa:monHoa,monPmi:monPmi,total:total,sunk:sunk,
       totalInterest:totalInterest,totalPaid:totalPaid,forgoneMo:forgoneMo,trueCost:trueCost,
-      ltv:100-state.dp,total10:total10,hoa10:hoa10};
+      ltv:100-s.dp,total10:total10,hoa10:hoa10,ppsf:ppsf};
   }
 
   function render(){
@@ -272,6 +334,8 @@
 
     var equityShare=(100*c.firstPrincipal/c.total).toFixed(0);
     var stats=[
+      {k:'Price / sq ft',v:c.ppsf>0?fmt(c.ppsf):'—',
+        n:state.sqft>0?(Math.round(state.sqft).toLocaleString('en-US')+' sq ft'+(state.year?'  ·  built '+state.year:'')):'Enter square footage',cls:''},
       {k:'Loan amount',v:fmt(c.loan),n:'Financed after down payment',cls:''},
       {k:'True monthly cost',v:fmt(c.trueCost),n:'Carry net of equity built — your "rent equivalent"',cls:'accent'},
       {k:'Builds equity',v:equityShare+'%',n:'Share of payment that is yours to keep (month 1)',cls:'good'},
@@ -297,11 +361,258 @@
     $('hoaPerVal').textContent=fmt(state.hoa)+'/mo';
     $('escVal').textContent=state.esc+'%/yr';
     $('retVal').textContent=state.ret.toFixed(1)+'%/yr';
+    $('ppsfHint').textContent=state.sqft>0?(fmt(state.price/state.sqft)+' per sq ft'):'Enter square footage for $/sq ft';
   }
 
   function update(){ syncLabels(); render(); }
 
+  // ---- saved units / comparison ----
+  function snapshot(){
+    var o={}; FIELDS.forEach(function(k){o[k]=state[k];}); return o;
+  }
+  function applyStateToInputs(){
+    $('uname').value=state.name||'';
+    $('price').value=state.price;
+    $('priceR').value=Math.min(1500000,Math.max(300000,state.price));
+    $('sqft').value=state.sqft||'';
+    $('year').value=state.year||'';
+    $('dpR').value=state.dp;
+    $('apr').value=state.apr;
+    $('tax').value=state.tax;
+    $('ins').value=state.ins;
+    $('hoa').value=state.hoa;
+    $('esc').value=state.esc;
+    $('ret').value=state.ret;
+    Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){
+      x.classList.toggle('on',+x.dataset.term===state.term);});
+  }
+  function findUnit(id){for(var i=0;i<units.length;i++){if(units[i].id===id)return units[i];}return null;}
+
+  function addUnit(){
+    var snap=snapshot();
+    if(!snap.name)snap.name='Unit '+seq;
+    snap.id='u'+(seq++);
+    units.push(snap); editingId=snap.id;
+    persist(); renderTable();
+  }
+  function updateUnit(){
+    var u=findUnit(editingId);
+    if(!u){addUnit();return;}
+    var snap=snapshot();
+    if(!snap.name)snap.name=u.name;
+    snap.id=u.id;
+    units[units.indexOf(u)]=snap;
+    persist(); renderTable();
+  }
+  function loadUnit(id){
+    var u=findUnit(id); if(!u)return;
+    FIELDS.forEach(function(k){if(u[k]!=null)state[k]=u[k];});
+    editingId=id;
+    applyStateToInputs(); update(); renderTable();
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function deleteUnit(id){
+    units=units.filter(function(x){return x.id!==id;});
+    if(editingId===id)editingId=null;
+    persist(); renderTable();
+  }
+  function cancelEdit(){editingId=null; renderTable();}
+
+  function renderTable(){
+    var eu=editingId?findUnit(editingId):null;
+    $('saveBtn').textContent=eu?'Update \u201c'+eu.name+'\u201d':'Add to comparison';
+    $('newBtn').style.display=eu?'inline-block':'none';
+    var en=$('editNote');
+    en.style.display=eu?'block':'none';
+    if(eu)en.textContent='Editing \u201c'+eu.name+'\u201d \u2014 edits will overwrite this saved unit.';
+    $('cmpCount').textContent=units.length?units.length+(units.length>1?' units':' unit'):'';
+
+    var body=$('cmpBody');
+    if(!units.length){
+      body.innerHTML='<div class="cmp-empty">No units saved yet. Set up a unit on the left and click <b>Add to comparison</b>.</div>';
+      return;
+    }
+    var rows=units.map(function(u){return {u:u,c:calc(u)};});
+    function minOf(f){
+      var vals=rows.map(f).filter(function(v){return v>0&&isFinite(v);});
+      return vals.length?Math.min.apply(null,vals):NaN;
+    }
+    var bPpsf=minOf(function(r){return r.c.ppsf;});
+    var bHoa=minOf(function(r){return r.u.hoa;});
+    var bCarry=minOf(function(r){return r.c.total;});
+    var bCarry10=minOf(function(r){return r.c.total10;});
+    var bTrue=minOf(function(r){return r.c.trueCost;});
+    function near(a,b){return isFinite(b)&&Math.abs(a-b)<0.5;}
+    function cell(v,isBest){return '<td'+(isBest?' class="best"':'')+'>'+v+'</td>';}
+
+    var h='<div class="tablewrap"><table class="cmp-t"><thead><tr>'+
+      '<th>Unit</th><th>Price</th><th>$/sq ft</th><th>Sq ft</th><th>Built</th>'+
+      '<th>Down (cash)</th><th>Loan</th><th>HOA/mo</th><th>Carry/mo</th>'+
+      '<th>Carry/10 yr</th><th>Lifetime int.</th><th>True cost/mo</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var u=r.u,c=r.c, down=u.price*u.dp/100;
+      h+='<tr'+(u.id===editingId?' class="sel"':'')+'>'+
+        '<td class="nm">'+esc(u.name)+'</td>'+
+        cell(fmt(u.price))+
+        cell(c.ppsf>0?fmt(c.ppsf):'\u2014',near(c.ppsf,bPpsf))+
+        cell(u.sqft>0?Math.round(u.sqft).toLocaleString('en-US'):'\u2014')+
+        cell(u.year||'\u2014')+
+        cell(fmt(down))+
+        cell(fmt(c.loan))+
+        cell(fmt(u.hoa),near(u.hoa,bHoa))+
+        cell(fmt(c.total),near(c.total,bCarry))+
+        cell(fmt(c.total10),near(c.total10,bCarry10))+
+        cell(fmt(c.totalInterest))+
+        cell(fmt(c.trueCost),near(c.trueCost,bTrue))+
+        '<td><div class="rowact">'+
+          '<button data-act="load" data-id="'+u.id+'">Load</button>'+
+          '<button data-act="del" data-id="'+u.id+'">Delete</button>'+
+        '</div></td></tr>';
+    });
+    h+='</tbody></table></div>';
+    body.innerHTML=h;
+  }
+
+  // ---- Excel (.xlsx) export — self-contained, no libraries ----
+  // Columns: header + accessor; num:true emits a numeric cell Excel can compute on.
+  var XCOLS=[
+    {h:'Unit',                num:false, f:function(u,c){return u.name;}},
+    {h:'Purchase price',      num:true,  f:function(u,c){return u.price;}},
+    {h:'Square footage',      num:true,  f:function(u,c){return u.sqft||'';}},
+    {h:'$ / sq ft',           num:true,  f:function(u,c){return c.ppsf>0?round2(c.ppsf):'';}},
+    {h:'Year built',          num:true,  f:function(u,c){return u.year||'';}},
+    {h:'Down payment %',      num:true,  f:function(u,c){return u.dp;}},
+    {h:'Down payment $',      num:true,  f:function(u,c){return round2(u.price*u.dp/100);}},
+    {h:'Loan amount',         num:true,  f:function(u,c){return round2(c.loan);}},
+    {h:'Term (yrs)',          num:true,  f:function(u,c){return u.term;}},
+    {h:'APR %',               num:true,  f:function(u,c){return u.apr;}},
+    {h:'Property tax %',      num:true,  f:function(u,c){return u.tax;}},
+    {h:'Insurance / yr',      num:true,  f:function(u,c){return u.ins;}},
+    {h:'HOA / mo',            num:true,  f:function(u,c){return u.hoa;}},
+    {h:'HOA escalation %',    num:true,  f:function(u,c){return u.esc;}},
+    {h:'Principal / mo',      num:true,  f:function(u,c){return round2(c.firstPrincipal);}},
+    {h:'Interest / mo',       num:true,  f:function(u,c){return round2(c.firstInterest);}},
+    {h:'Property tax / mo',   num:true,  f:function(u,c){return round2(c.monTax);}},
+    {h:'Insurance / mo',      num:true,  f:function(u,c){return round2(c.monIns);}},
+    {h:'PMI / mo',            num:true,  f:function(u,c){return round2(c.monPmi);}},
+    {h:'Monthly carry',       num:true,  f:function(u,c){return round2(c.total);}},
+    {h:'Carry in 10 yrs',     num:true,  f:function(u,c){return round2(c.total10);}},
+    {h:'True monthly cost',   num:true,  f:function(u,c){return round2(c.trueCost);}},
+    {h:'Lifetime interest',   num:true,  f:function(u,c){return round2(c.totalInterest);}}
+  ];
+  function round2(n){return Math.round(n*100)/100;}
+  function xesc(s){return String(s).replace(/[&<>"']/g,function(ch){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
+  function colLetter(i){var s='';i++;while(i>0){var m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=(i-m-1)/26;}return s;}
+
+  function sheetXml(){
+    var rowsXml='';
+    function rowXml(rIdx,cells){
+      var cs='';
+      for(var i=0;i<cells.length;i++){
+        var ref=colLetter(i)+(rIdx+1), cv=cells[i].v, isNum=cells[i].num;
+        if(isNum && cv!=='' && isFinite(cv))
+          cs+='<c r="'+ref+'" s="'+cells[i].s+'"><v>'+cv+'</v></c>';
+        else
+          cs+='<c r="'+ref+'" t="inlineStr" s="'+cells[i].s+'"><is><t xml:space="preserve">'+xesc(cv===''||cv==null?'':cv)+'</t></is></c>';
+      }
+      return '<row r="'+(rIdx+1)+'">'+cs+'</row>';
+    }
+    rowsXml+=rowXml(0,XCOLS.map(function(col){return {v:col.h,num:false,s:1};}));
+    units.forEach(function(u,ui){
+      var c=calc(u);
+      rowsXml+=rowXml(ui+1,XCOLS.map(function(col){return {v:col.f(u,c),num:col.num,s:0};}));
+    });
+    var lastCol=colLetter(XCOLS.length-1);
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<dimension ref="A1:'+lastCol+(units.length+1)+'"/>'+
+      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'+
+      '<sheetFormatPr defaultRowHeight="15"/>'+
+      '<sheetData>'+rowsXml+'</sheetData></worksheet>';
+  }
+
+  var XLSX_PARTS={
+    '[Content_Types].xml':'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+      '<Default Extension="xml" ContentType="application/xml"/>'+
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+      '</Types>',
+    '_rels/.rels':'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'+
+      '</Relationships>',
+    'xl/workbook.xml':'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+      '<sheets><sheet name="Comparison" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels':'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+
+      '</Relationships>',
+    'xl/styles.xml':'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'+
+      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'+
+      '<borders count="1"><border/></borders>'+
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'+
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
+      '</styleSheet>'
+  };
+
+  // minimal "store" (uncompressed) ZIP writer with CRC-32
+  var CRC=(function(){var t=[];for(var n=0;n<256;n++){var c=n;
+    for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+  function crc32(b){var c=0xFFFFFFFF;for(var i=0;i<b.length;i++)c=CRC[(c^b[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+  function zip(files){
+    var enc=new TextEncoder(), parts=[], central=[], offset=0;
+    function u16(a,v){a.push(v&0xFF,(v>>>8)&0xFF);}
+    function u32(a,v){a.push(v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF);}
+    files.forEach(function(f){
+      var name=enc.encode(f.name), data=enc.encode(f.data), crc=crc32(data);
+      var lh=[]; u32(lh,0x04034b50); u16(lh,20); u16(lh,0); u16(lh,0); u16(lh,0); u16(lh,0);
+      u32(lh,crc); u32(lh,data.length); u32(lh,data.length); u16(lh,name.length); u16(lh,0);
+      parts.push(new Uint8Array(lh), name, data);
+      var ch=[]; u32(ch,0x02014b50); u16(ch,20); u16(ch,20); u16(ch,0); u16(ch,0); u16(ch,0); u16(ch,0);
+      u32(ch,crc); u32(ch,data.length); u32(ch,data.length); u16(ch,name.length);
+      u16(ch,0); u16(ch,0); u16(ch,0); u16(ch,0); u32(ch,0); u32(ch,offset);
+      central.push(new Uint8Array(ch), name);
+      offset+=lh.length+name.length+data.length;
+    });
+    var cdStart=offset, cdLen=0;
+    central.forEach(function(p){cdLen+=p.length;});
+    var end=[]; u32(end,0x06054b50); u16(end,0); u16(end,0);
+    u16(end,files.length); u16(end,files.length); u32(end,cdLen); u32(end,cdStart); u16(end,0);
+    var all=parts.concat(central,[new Uint8Array(end)]);
+    var total=all.reduce(function(s,p){return s+p.length;},0);
+    var out=new Uint8Array(total), pos=0;
+    all.forEach(function(p){out.set(p,pos);pos+=p.length;});
+    return out;
+  }
+
+  function exportXlsx(){
+    if(!units.length){alert('Add at least one unit to the comparison first.');return;}
+    var files=[];
+    for(var k in XLSX_PARTS) if(XLSX_PARTS.hasOwnProperty(k)) files.push({name:k,data:XLSX_PARTS[k]});
+    files.push({name:'xl/worksheets/sheet1.xml',data:sheetXml()});
+    var blob=new Blob([zip(files)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    var d=new Date(), p=function(n){return (n<10?'0':'')+n;};
+    var stamp=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+    var url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download='condo-comparison-'+stamp+'.xlsx';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  }
+
   // wiring
+  $('uname').addEventListener('input',function(e){state.name=e.target.value;});
+  $('sqft').addEventListener('input',function(e){state.sqft=+e.target.value||0;update()});
+  $('year').addEventListener('input',function(e){var y=parseInt(e.target.value,10);state.year=isNaN(y)?'':y;update()});
   $('price').addEventListener('input',function(e){state.price=+e.target.value||0;$('priceR').value=Math.min(1500000,Math.max(300000,state.price));update()});
   $('priceR').addEventListener('input',function(e){state.price=+e.target.value;$('price').value=state.price;update()});
   $('dpR').addEventListener('input',function(e){state.dp=+e.target.value;update()});
@@ -318,9 +629,23 @@
     });
   });
 
+  // save bar
+  $('saveBtn').addEventListener('click',function(){editingId?updateUnit():addUnit();});
+  $('newBtn').addEventListener('click',cancelEdit);
+  $('xlsxBtn').addEventListener('click',exportXlsx);
+
+  // table row actions (delegated)
+  $('cmpBody').addEventListener('click',function(e){
+    var b=e.target.closest('button[data-act]'); if(!b)return;
+    var id=b.getAttribute('data-id');
+    if(b.getAttribute('data-act')==='load')loadUnit(id);
+    else deleteUnit(id);
+  });
+
   // init slider positions
   $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp;
   update();
+  renderTable();
 })();
 </script>
 </body>
