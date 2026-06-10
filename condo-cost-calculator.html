@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Condo Cost Calculator</title>
+<style>
+  :root{
+    --canvas:#ECEDE8;
+    --surface:#FAFAF7;
+    --ink:#1C2A39;
+    --ink2:#6A7585;
+    --hair:#D6D8CF;
+    --hair2:#E4E5DE;
+    --brass:#9A6B2F;
+    --equity:#2F6E5A;
+    --interest:#8B4A3B;
+    --tax:#B07A36;
+    --ins:#5E7A86;
+    --hoa:#7C6A9C;
+    --pmi:#A6534E;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--canvas);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.45;
+    padding:clamp(14px,3vw,40px);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+
+  /* Masthead */
+  .mast{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:26px}
+  .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--brass);font-weight:700}
+  .mast h1{font-size:clamp(26px,5vw,40px);font-weight:800;letter-spacing:-.02em;line-height:1.02;margin-top:6px}
+  .mast p{color:var(--ink2);font-size:14px;margin-top:8px;max-width:62ch}
+
+  .grid{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:26px;align-items:start}
+  @media (max-width:780px){.grid{grid-template-columns:1fr}}
+
+  /* Panels */
+  .panel{background:var(--surface);border:1px solid var(--hair);border-radius:4px;padding:20px}
+  .panel-title{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700;
+    border-bottom:1px solid var(--hair2);padding-bottom:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:baseline}
+  .panel-title span{color:var(--brass)}
+
+  /* Inputs */
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  .field label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:600;margin-bottom:6px}
+  .field label .val{font-family:var(--mono);font-size:13px;color:var(--brass);font-weight:700;font-variant-numeric:tabular-nums}
+  .ipt{width:100%;font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink);
+    background:#fff;border:1px solid var(--hair);border-radius:3px;padding:9px 10px;outline:none}
+  .ipt:focus{border-color:var(--brass);box-shadow:0 0 0 2px rgba(154,107,47,.18)}
+  .prefix{position:relative}
+  .prefix span{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--ink2);font-family:var(--mono);font-size:15px}
+  .prefix .ipt{padding-left:22px}
+
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:var(--hair);border-radius:2px;margin-top:10px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;
+    background:var(--brass);cursor:pointer;border:3px solid var(--surface);box-shadow:0 0 0 1px var(--brass)}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--brass);cursor:pointer;border:3px solid var(--surface)}
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 1px var(--brass),0 0 0 4px rgba(154,107,47,.3)}
+
+  .seg{display:flex;gap:0;border:1px solid var(--hair);border-radius:3px;overflow:hidden}
+  .seg button{flex:1;background:#fff;border:none;padding:9px 4px;font-family:var(--mono);font-size:13px;font-weight:600;
+    color:var(--ink2);cursor:pointer;border-right:1px solid var(--hair)}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--ink);color:#fff}
+  .hint{font-size:11px;color:var(--ink2);margin-top:5px;line-height:1.4}
+
+  /* Hero result */
+  .hero{border:1px solid var(--hair);border-radius:4px;background:var(--ink);color:#fff;padding:22px 22px 18px;margin-bottom:18px}
+  .hero .lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9fb0c4;font-weight:700}
+  .hero .big{font-family:var(--mono);font-weight:700;font-size:clamp(38px,8vw,56px);letter-spacing:-.02em;
+    line-height:1;margin:6px 0 2px;font-variant-numeric:tabular-nums;color:#E8C88A}
+  .hero .sub{font-size:13px;color:#9fb0c4}
+  .hero .sub b{color:#fff;font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* Composition bar */
+  .barwrap{margin:18px 0 8px}
+  .bar{display:flex;width:100%;height:30px;border-radius:3px;overflow:hidden;border:1px solid var(--hair)}
+  .bar > div{height:100%;position:relative;min-width:2px;transition:width .35s ease}
+  .bar .sunk{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.16) 0 5px,transparent 5px 10px)}
+  .legend{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
+  @media (max-width:480px){.legend{grid-template-columns:1fr}}
+  .leg{display:flex;align-items:center;gap:9px;font-size:13px}
+  .leg .dot{width:11px;height:11px;border-radius:2px;flex:none}
+  .leg .nm{flex:1;color:var(--ink)}
+  .leg .am{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600}
+  .leg .pc{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink2);font-size:12px;width:42px;text-align:right}
+
+  /* Stats grid */
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:4px;overflow:hidden;margin-top:18px}
+  @media (max-width:480px){.stats{grid-template-columns:1fr}}
+  .stat{background:var(--surface);padding:14px 16px}
+  .stat .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+  .stat .v{font-family:var(--mono);font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:4px;letter-spacing:-.01em}
+  .stat .n{font-size:11px;color:var(--ink2);margin-top:3px;line-height:1.35}
+  .stat.accent .v{color:var(--brass)}
+  .stat.good .v{color:var(--equity)}
+
+  .note{font-size:12px;color:var(--ink2);margin-top:18px;line-height:1.55;border-top:1px solid var(--hair2);padding-top:14px}
+  .note b{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="eyebrow">Dallas Condo / Townhome &middot; Monthly Carry Model</div>
+    <h1>What it actually costs to hold it</h1>
+    <p>Every dollar of the monthly payment, split by where it goes — equity you keep versus cost that leaves. Texas-tuned: no state income tax, but high property tax. Adjust anything; the numbers update live.</p>
+  </header>
+
+  <div class="grid">
+    <!-- INPUTS -->
+    <section class="panel" aria-label="Inputs">
+      <div class="panel-title">Inputs <span>edit any field</span></div>
+
+      <div class="field">
+        <label for="price">Purchase price <span class="val" id="priceVal">$700,000</span></label>
+        <div class="prefix"><span>$</span><input class="ipt" type="number" id="price" value="700000" min="100000" step="5000"></div>
+        <input type="range" id="priceR" min="300000" max="1500000" step="5000" value="700000" aria-label="Purchase price slider">
+      </div>
+
+      <div class="field">
+        <label for="dpR">Down payment <span class="val" id="dpVal">20% &middot; $140,000</span></label>
+        <input type="range" id="dpR" min="0" max="100" step="1" value="20" aria-label="Down payment percent">
+        <div class="hint" id="loanHint">Loan amount: $560,000</div>
+      </div>
+
+      <div class="field">
+        <label>Loan term</label>
+        <div class="seg" id="termSeg" role="group" aria-label="Loan term">
+          <button data-term="30" class="on">30 yr</button>
+          <button data-term="20">20 yr</button>
+          <button data-term="15">15 yr</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="apr">Mortgage APR <span class="val" id="aprVal">6.50%</span></label>
+        <input type="range" id="apr" min="2" max="10" step="0.05" value="6.5" aria-label="APR slider">
+      </div>
+
+      <div class="field">
+        <label for="tax">Property tax rate <span class="val" id="taxVal">2.10%/yr</span></label>
+        <input type="range" id="tax" min="0" max="3.5" step="0.05" value="2.1" aria-label="Property tax rate">
+        <div class="hint">Dallas-area effective rates often land ~1.8&ndash;2.4%. There's no state income tax to offset it.</div>
+      </div>
+
+      <div class="field">
+        <label for="ins">Insurance (HO-6) <span class="val" id="insVal">$1,800/yr</span></label>
+        <div class="prefix"><span>$</span><input class="ipt" type="number" id="ins" value="1800" min="0" step="100"></div>
+        <div class="hint">Condos use an HO-6 unit policy; the HOA's master policy covers the structure.</div>
+      </div>
+
+      <div class="field">
+        <label for="hoa">HOA dues <span class="val" id="hoaPerVal">$500/mo</span></label>
+        <div class="prefix"><span>$</span><input class="ipt" type="number" id="hoa" value="500" min="0" step="25"></div>
+      </div>
+
+      <div class="field">
+        <label for="esc">HOA escalation <span class="val" id="escVal">4%/yr</span></label>
+        <input type="range" id="esc" min="0" max="10" step="0.5" value="4" aria-label="HOA annual increase">
+      </div>
+
+      <div class="field">
+        <label for="ret">Expected market return <span class="val" id="retVal">7.0%/yr</span></label>
+        <input type="range" id="ret" min="0" max="12" step="0.5" value="7" aria-label="Expected investment return">
+        <div class="hint">Used to value the forgone return on cash tied up in the down payment.</div>
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+    <section aria-label="Results">
+      <div class="hero">
+        <div class="lbl">Total monthly carry</div>
+        <div class="big" id="totalOut">$0</div>
+        <div class="sub">Of which <b id="equityOut">$0</b> builds equity &middot; <b id="sunkOut">$0</b> is sunk cost</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Where the payment goes <span id="ltvTag">LTV 80%</span></div>
+        <div class="barwrap"><div class="bar" id="bar"></div></div>
+        <div class="legend" id="legend"></div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="note">
+        <b>Reading it:</b> hatched segments are money that leaves you each month (interest, tax, insurance, HOA, PMI). The solid green slice is the principal you keep. <b>True monthly cost</b> nets that equity back out — it's the closest thing to "rent equivalent" for owning. The <b>forgone return</b> stat is the opportunity cost of parking cash in the down payment instead of the market. Property tax shown is fixed-rate on today's price; in reality assessed value (and thus tax) tends to rise over time.
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var fmt=function(n){return '$'+Math.round(n).toLocaleString('en-US')};
+  var fmt2=function(n){return '$'+n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})};
+  var pct=function(n,d){return (100*n/d).toFixed(0)+'%'};
+
+  var state={price:700000,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,pmiRate:0.6};
+
+  function calc(){
+    var loan=state.price*(1-state.dp/100);
+    var r=state.apr/100/12, n=state.term*12;
+    var pi = r===0 ? loan/n : loan*r/(1-Math.pow(1+r,-n));
+    var firstInterest=loan*r;
+    var firstPrincipal=Math.max(0,pi-firstInterest);
+    var monTax=state.price*state.tax/100/12;
+    var monIns=state.ins/12;
+    var monHoa=state.hoa;
+    var monPmi=(state.dp<20)? loan*state.pmiRate/100/12 : 0;
+    var total=pi+monTax+monIns+monHoa+monPmi;
+    var sunk=firstInterest+monTax+monIns+monHoa+monPmi;
+    var totalPaid=pi*n;
+    var totalInterest=totalPaid-loan;
+    var forgoneMo=(state.price*state.dp/100)*state.ret/100/12;
+    var trueCost=total-firstPrincipal;
+    // 10-yr projected HOA (and the rest held flat for a conservative single figure)
+    var hoa10=state.hoa*Math.pow(1+state.esc/100,10);
+    var total10=pi+monTax+monIns+hoa10+monPmi;
+    return {loan:loan,pi:pi,firstInterest:firstInterest,firstPrincipal:firstPrincipal,
+      monTax:monTax,monIns:monIns,monHoa:monHoa,monPmi:monPmi,total:total,sunk:sunk,
+      totalInterest:totalInterest,totalPaid:totalPaid,forgoneMo:forgoneMo,trueCost:trueCost,
+      ltv:100-state.dp,total10:total10,hoa10:hoa10};
+  }
+
+  function render(){
+    var c=calc();
+    $('totalOut').textContent=fmt(c.total);
+    $('equityOut').textContent=fmt(c.firstPrincipal);
+    $('sunkOut').textContent=fmt(c.sunk);
+    $('ltvTag').textContent='LTV '+c.ltv+'%';
+
+    var segs=[
+      {nm:'Principal (equity)',v:c.firstPrincipal,col:'var(--equity)',sunk:false},
+      {nm:'Interest',v:c.firstInterest,col:'var(--interest)',sunk:true},
+      {nm:'Property tax',v:c.monTax,col:'var(--tax)',sunk:true},
+      {nm:'Insurance',v:c.monIns,col:'var(--ins)',sunk:true},
+      {nm:'HOA dues',v:c.monHoa,col:'var(--hoa)',sunk:true},
+      {nm:'PMI',v:c.monPmi,col:'var(--pmi)',sunk:true}
+    ].filter(function(s){return s.v>0.5});
+
+    var bar=$('bar'); bar.innerHTML='';
+    var leg=$('legend'); leg.innerHTML='';
+    segs.forEach(function(s){
+      var d=document.createElement('div');
+      d.style.width=(100*s.v/c.total)+'%';
+      d.style.background=s.col;
+      if(s.sunk) d.className='sunk';
+      d.title=s.nm+' '+fmt(s.v);
+      bar.appendChild(d);
+
+      var l=document.createElement('div'); l.className='leg';
+      l.innerHTML='<span class="dot" style="background:'+s.col+'"></span>'+
+        '<span class="nm">'+s.nm+'</span>'+
+        '<span class="am">'+fmt(s.v)+'</span>'+
+        '<span class="pc">'+pct(s.v,c.total)+'</span>';
+      leg.appendChild(l);
+    });
+
+    var equityShare=(100*c.firstPrincipal/c.total).toFixed(0);
+    var stats=[
+      {k:'Loan amount',v:fmt(c.loan),n:'Financed after down payment',cls:''},
+      {k:'True monthly cost',v:fmt(c.trueCost),n:'Carry net of equity built — your "rent equivalent"',cls:'accent'},
+      {k:'Builds equity',v:equityShare+'%',n:'Share of payment that is yours to keep (month 1)',cls:'good'},
+      {k:'Lifetime interest',v:fmt(c.totalInterest),n:'Total interest over '+state.term+' years',cls:''},
+      {k:'Forgone return',v:fmt(c.forgoneMo)+'/mo',n:'Monthly opportunity cost of the down payment at '+state.ret+'%',cls:''},
+      {k:'Carry in 10 yrs',v:fmt(c.total10),n:'HOA grown at '+state.esc+'%/yr (tax & insurance held flat)',cls:''}
+    ];
+    var sg=$('stats'); sg.innerHTML='';
+    stats.forEach(function(s){
+      var el=document.createElement('div'); el.className='stat '+s.cls;
+      el.innerHTML='<div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div>';
+      sg.appendChild(el);
+    });
+  }
+
+  function syncLabels(){
+    $('priceVal').textContent=fmt(state.price);
+    $('dpVal').textContent=state.dp+'% \u00b7 '+fmt(state.price*state.dp/100);
+    $('loanHint').textContent='Loan amount: '+fmt(state.price*(1-state.dp/100))+(state.dp<20?'  \u2014  under 20% adds PMI':'');
+    $('aprVal').textContent=state.apr.toFixed(2)+'%';
+    $('taxVal').textContent=state.tax.toFixed(2)+'%/yr';
+    $('insVal').textContent=fmt(state.ins)+'/yr';
+    $('hoaPerVal').textContent=fmt(state.hoa)+'/mo';
+    $('escVal').textContent=state.esc+'%/yr';
+    $('retVal').textContent=state.ret.toFixed(1)+'%/yr';
+  }
+
+  function update(){ syncLabels(); render(); }
+
+  // wiring
+  $('price').addEventListener('input',function(e){state.price=+e.target.value||0;$('priceR').value=Math.min(1500000,Math.max(300000,state.price));update()});
+  $('priceR').addEventListener('input',function(e){state.price=+e.target.value;$('price').value=state.price;update()});
+  $('dpR').addEventListener('input',function(e){state.dp=+e.target.value;update()});
+  $('apr').addEventListener('input',function(e){state.apr=+e.target.value;update()});
+  $('tax').addEventListener('input',function(e){state.tax=+e.target.value;update()});
+  $('ins').addEventListener('input',function(e){state.ins=+e.target.value||0;update()});
+  $('hoa').addEventListener('input',function(e){state.hoa=+e.target.value||0;update()});
+  $('esc').addEventListener('input',function(e){state.esc=+e.target.value;update()});
+  $('ret').addEventListener('input',function(e){state.ret=+e.target.value;update()});
+  Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(b){
+    b.addEventListener('click',function(){
+      Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){x.classList.remove('on')});
+      b.classList.add('on'); state.term=+b.dataset.term; update();
+    });
+  });
+
+  // init slider positions
+  $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp;
+  update();
+})();
+</script>
+</body>
+</html>
