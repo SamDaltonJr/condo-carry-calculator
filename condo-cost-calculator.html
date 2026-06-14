@@ -132,6 +132,24 @@
   .rowact button:hover{border-color:var(--ink);color:var(--ink)}
   .cmp-empty{padding:28px;text-align:center;color:var(--ink2);font-size:13px}
 
+  /* Carry-over-time chart */
+  .tl-wrap{position:relative;margin-top:6px}
+  .tl-wrap svg{width:100%;height:auto;display:block;overflow:visible}
+  .tl-grid{stroke:var(--hair2);stroke-width:1}
+  .tl-axis{stroke:var(--hair);stroke-width:1}
+  .tl-area{stroke:none}
+  .tl-mark{stroke:var(--ink);stroke-width:1;stroke-dasharray:3 3}
+  .tl-marktxt{fill:var(--ink2);font-family:var(--mono);font-size:9px;font-weight:700}
+  .tl-axislbl{fill:var(--ink2);font-family:var(--mono);font-size:9px}
+  .tl-cursor{stroke:var(--ink);stroke-width:1;opacity:0;pointer-events:none}
+  .tl-tip{position:absolute;top:6px;pointer-events:none;background:var(--ink);color:#fff;border-radius:4px;
+    padding:8px 10px;font-size:11px;min-width:148px;opacity:0;transform:translate(-50%,0);transition:opacity .08s;
+    z-index:5;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .tl-tip .tt-h{font-weight:700;color:#E8C88A;font-family:var(--mono);font-variant-numeric:tabular-nums;margin-bottom:6px;white-space:nowrap}
+  .tl-tip .tt-r{display:flex;align-items:center;gap:7px;line-height:1.55;white-space:nowrap}
+  .tl-tip .tt-r b{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tl-tip .tt-dot{width:8px;height:8px;border-radius:2px;flex:none}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -235,12 +253,23 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">Where the payment goes <span id="ltvTag">LTV 80%</span></div>
+        <div class="panel-title">Where the payment goes &middot; month 1 <span id="ltvTag">LTV 80%</span></div>
         <div class="barwrap"><div class="bar" id="bar"></div></div>
         <div class="legend" id="legend"></div>
       </div>
 
       <div class="stats" id="stats"></div>
+
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-title">Monthly carry over time <span id="tlSpan">30-year projection</span></div>
+        <div class="tl-wrap" id="tlWrap">
+          <svg id="tlSvg" viewBox="0 0 700 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Monthly carry composition projected over the loan term"></svg>
+          <div class="tl-tip" id="tlTip"></div>
+        </div>
+        <div class="legend" id="tlLegend" style="margin-top:16px"></div>
+        <div class="stats" id="tlStats"></div>
+        <div class="hint" style="margin-top:14px">Principal &amp; interest is fixed for the life of the loan; the bands show how its split shifts toward equity over time. HOA grows at your escalation rate and PMI drops off at 20% equity. Property tax &amp; insurance are held flat (today's figures). Hover the chart for any year's breakdown.</div>
+      </div>
 
       <div class="note">
         <b>Reading it:</b> hatched segments are money that leaves you each month (interest, tax, insurance, HOA, PMI). The solid green slice is the principal you keep. <b>True monthly cost</b> nets that equity back out — it's the closest thing to "rent equivalent" for owning. The <b>forgone return</b> stat is the opportunity cost of parking cash in the down payment instead of the market. Property tax shown is fixed-rate on today's price; in reality assessed value (and thus tax) tends to rise over time.
@@ -351,6 +380,144 @@
     });
   }
 
+  // ---- carry over time (amortization-aware projection) ----
+  var TL_LAYERS=[
+    {k:'prin',col:'var(--equity)', nm:'Principal (equity)'},
+    {k:'int', col:'var(--interest)',nm:'Interest'},
+    {k:'tax', col:'var(--tax)',     nm:'Property tax'},
+    {k:'ins', col:'var(--ins)',     nm:'Insurance'},
+    {k:'hoa', col:'var(--hoa)',     nm:'HOA dues'},
+    {k:'pmi', col:'var(--pmi)',     nm:'PMI'}
+  ];
+  var tlGeom=null; // {xs, years, total} for hover
+
+  function schedule(s){
+    s=s||state;
+    var loan=s.price*(1-s.dp/100);
+    var r=s.apr/100/12, n=s.term*12;
+    var pi = r===0 ? loan/n : loan*r/(1-Math.pow(1+r,-n));
+    var monTax=s.price*s.tax/100/12, monIns=s.ins/12;
+    var pmiBase=loan*s.pmiRate/100/12, hasPmi=s.dp<20;
+    var bal=loan, years=[], pmiEndMonth=null, crossMonth=null;
+    for(var y=0;y<s.term;y++){
+      var hoaY=s.hoa*Math.pow(1+s.esc/100,y);
+      var a={prin:0,int:0,tax:0,ins:0,hoa:0,pmi:0}, cnt=0;
+      for(var mo=0;mo<12;mo++){
+        var m=y*12+mo+1; if(m>n) break;
+        var interest=bal*r, principal=Math.min(bal,pi-interest);
+        bal-=principal;
+        var pmi=(hasPmi && bal/s.price>0.80)? pmiBase : 0;
+        if(hasPmi && pmiEndMonth===null && pmi===0) pmiEndMonth=m;
+        if(crossMonth===null && principal>interest) crossMonth=m;
+        a.prin+=principal; a.int+=interest; a.tax+=monTax; a.ins+=monIns; a.hoa+=hoaY; a.pmi+=pmi; cnt++;
+      }
+      var d={year:y+1,prin:a.prin/cnt,int:a.int/cnt,tax:a.tax/cnt,ins:a.ins/cnt,hoa:a.hoa/cnt,pmi:a.pmi/cnt};
+      d.total=d.prin+d.int+d.tax+d.ins+d.hoa+d.pmi;
+      years.push(d);
+    }
+    return {years:years,pi:pi,hasPmi:hasPmi,pmiEndMonth:pmiEndMonth,crossMonth:crossMonth,term:s.term};
+  }
+
+  function niceStep(raw){
+    var pow=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)), f=raw/pow;
+    var m=f<=1?1:f<=2?2:f<=5?5:10; return m*pow;
+  }
+
+  function renderTimeline(){
+    var sc=schedule(), yrs=sc.years, N=yrs.length;
+    $('tlSpan').textContent=sc.term+'-year projection';
+    var W=700,H=300,L=52,R=14,T=12,B=26, pw=W-L-R, ph=H-T-B;
+    var maxT=Math.max.apply(null,yrs.map(function(d){return d.total;}))||1;
+    var step=niceStep(maxT/4), top=Math.ceil(maxT/step)*step;
+    function X(i){return L+(N<=1?pw/2:i/(N-1)*pw);}
+    function Y(v){return T+ph-v/top*ph;}
+
+    var svg='';
+    // gridlines + y labels
+    for(var g=0; g<=top+0.5; g+=step){
+      var gy=Y(g);
+      svg+='<line class="tl-grid" x1="'+L+'" y1="'+gy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+gy.toFixed(1)+'"/>';
+      svg+='<text class="tl-axislbl" x="'+(L-6)+'" y="'+(gy+3).toFixed(1)+'" text-anchor="end">$'+Math.round(g).toLocaleString('en-US')+'</text>';
+    }
+    // stacked areas (bottom -> top)
+    var base=yrs.map(function(){return 0;});
+    TL_LAYERS.forEach(function(layer){
+      var any=yrs.some(function(d){return d[layer.k]>0.5;});
+      if(!any){return;}
+      var tops=yrs.map(function(d,i){return base[i]+d[layer.k];});
+      var dpath='M '+X(0).toFixed(1)+' '+Y(tops[0]).toFixed(1);
+      for(var i=1;i<N;i++) dpath+=' L '+X(i).toFixed(1)+' '+Y(tops[i]).toFixed(1);
+      for(var j=N-1;j>=0;j--) dpath+=' L '+X(j).toFixed(1)+' '+Y(base[j]).toFixed(1);
+      dpath+=' Z';
+      svg+='<path class="tl-area" d="'+dpath+'" fill="'+layer.col+'" fill-opacity="0.92"/>';
+      base=tops;
+    });
+    // x axis + year labels
+    svg+='<line class="tl-axis" x1="'+L+'" y1="'+(T+ph)+'" x2="'+(W-R)+'" y2="'+(T+ph)+'"/>';
+    var tickEvery=N<=12?(N<=6?1:2):5;
+    for(var t=0;t<N;t++){
+      var yr=yrs[t].year;
+      if(yr===1||yr===N||yr%tickEvery===0){
+        svg+='<text class="tl-axislbl" x="'+X(t).toFixed(1)+'" y="'+(T+ph+15)+'" text-anchor="middle">'+yr+'</text>';
+      }
+    }
+    // milestone markers
+    function marker(month,label){
+      if(!month) return;
+      var yi=Math.min(N-1,Math.ceil(month/12)-1), mx=X(yi);
+      svg+='<line class="tl-mark" x1="'+mx.toFixed(1)+'" y1="'+T+'" x2="'+mx.toFixed(1)+'" y2="'+(T+ph)+'"/>';
+      svg+='<text class="tl-marktxt" x="'+(mx+3).toFixed(1)+'" y="'+(T+9)+'">'+label+'</text>';
+    }
+    if(sc.hasPmi) marker(sc.pmiEndMonth,'PMI ends');
+    marker(sc.crossMonth,'Equity > interest');
+    // hover cursor
+    svg+='<line id="tlCursor" class="tl-cursor" x1="0" y1="'+T+'" x2="0" y2="'+(T+ph)+'"/>';
+    $('tlSvg').innerHTML=svg;
+
+    // legend
+    var legParts=TL_LAYERS.filter(function(l){return yrs.some(function(d){return d[l.k]>0.5;});});
+    $('tlLegend').innerHTML=legParts.map(function(l){
+      return '<div class="leg"><span class="dot" style="background:'+l.col+'"></span><span class="nm">'+l.nm+'</span></div>';
+    }).join('');
+
+    // milestone stat tiles
+    var first=yrs[0], last=yrs[N-1], delta=last.total-first.total;
+    var ms=[
+      {k:'Payment is fixed',v:fmt(sc.pi)+'/mo',n:'Principal + interest never changes — only its split (and HOA/PMI) move'},
+      {k:'PMI ends', v: sc.hasPmi?(sc.pmiEndMonth?('Year '+Math.ceil(sc.pmiEndMonth/12)):'After term'):'No PMI',
+        n: sc.hasPmi?'When you reach 20% equity (PMI drops off)':'Down payment is 20% or more'},
+      {k:'Equity > interest', v: sc.crossMonth?(sc.crossMonth<=1?'Month 1':'Year '+Math.ceil(sc.crossMonth/12)):'After term',
+        n:'When more of each payment builds equity than goes to interest', cls:'good'},
+      {k:'Carry · year '+sc.term, v:fmt(last.total),
+        n:(delta>=0?'+':'')+fmt(delta)+'/mo vs year 1 (HOA growth, less PMI)'}
+    ];
+    $('tlStats').innerHTML=ms.map(function(s){
+      return '<div class="stat '+(s.cls||'')+'"><div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div></div>';
+    }).join('');
+
+    // stash geometry for hover
+    var xs=[]; for(var q=0;q<N;q++) xs.push(X(q));
+    tlGeom={xs:xs,years:yrs,W:W,L:L,R:R,pw:pw,N:N};
+  }
+
+  function tlHover(e){
+    if(!tlGeom) return;
+    var wrap=$('tlWrap'), rect=wrap.getBoundingClientRect();
+    var vbx=(e.clientX-rect.left)/rect.width*tlGeom.W;
+    var i=Math.round((vbx-tlGeom.L)/tlGeom.pw*(tlGeom.N-1));
+    i=Math.max(0,Math.min(tlGeom.N-1,i));
+    var d=tlGeom.years[i], cx=tlGeom.xs[i];
+    var cur=$('tlCursor'); cur.setAttribute('x1',cx); cur.setAttribute('x2',cx); cur.style.opacity='0.5';
+    var tip=$('tlTip');
+    var rows=TL_LAYERS.filter(function(l){return d[l.k]>0.5;}).map(function(l){
+      return '<div class="tt-r"><span class="tt-dot" style="background:'+l.col+'"></span>'+l.nm.replace(' (equity)','')+'<b>'+fmt(d[l.k])+'</b></div>';
+    }).join('');
+    tip.innerHTML='<div class="tt-h">Year '+d.year+' &middot; '+fmt(d.total)+'/mo</div>'+rows;
+    tip.style.left=(cx/tlGeom.W*100)+'%';
+    tip.style.opacity='1';
+  }
+  function tlLeave(){ if($('tlCursor'))$('tlCursor').style.opacity='0'; $('tlTip').style.opacity='0'; }
+
   function syncLabels(){
     $('priceVal').textContent=fmt(state.price);
     $('dpVal').textContent=state.dp+'% \u00b7 '+fmt(state.price*state.dp/100);
@@ -364,7 +531,7 @@
     $('ppsfHint').textContent=state.sqft>0?(fmt(state.price/state.sqft)+' per sq ft'):'Enter square footage for $/sq ft';
   }
 
-  function update(){ syncLabels(); render(); }
+  function update(){ syncLabels(); render(); renderTimeline(); }
 
   // ---- saved units / comparison ----
   function snapshot(){
@@ -633,6 +800,10 @@
   $('saveBtn').addEventListener('click',function(){editingId?updateUnit():addUnit();});
   $('newBtn').addEventListener('click',cancelEdit);
   $('xlsxBtn').addEventListener('click',exportXlsx);
+
+  // timeline hover
+  $('tlWrap').addEventListener('mousemove',tlHover);
+  $('tlWrap').addEventListener('mouseleave',tlLeave);
 
   // table row actions (delegated)
   $('cmpBody').addEventListener('click',function(e){
