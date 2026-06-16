@@ -155,6 +155,14 @@
   .pv-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:baseline}
   table.cmp-t tr.tot td{font-weight:700;border-top:2px solid var(--hair)}
 
+  /* Rent vs. buy bars */
+  .rb-cmp{margin:16px 0 4px;display:flex;flex-direction:column;gap:10px}
+  .rb-row{display:flex;align-items:center;gap:12px}
+  .rb-lbl{width:40px;font-size:12px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.06em}
+  .rb-track{flex:1;height:26px;background:var(--hair2);border-radius:3px;overflow:hidden}
+  .rb-fill{height:100%;border-radius:3px;min-width:2px;transition:width .35s ease}
+  .rb-amt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;font-size:14px;width:92px;text-align:right}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -259,6 +267,17 @@
         <div class="hint">Agent commission + closing costs at sale, as a share of the sale price (~6&ndash;8%).</div>
       </div>
 
+      <div class="field">
+        <label for="rent">Comparable rent <span class="val" id="rentVal">$3,000/mo</span></label>
+        <div class="prefix"><span>$</span><input class="ipt" type="number" id="rent" value="3000" min="0" step="50"></div>
+        <div class="hint">Monthly rent for a similar place &mdash; the alternative to buying.</div>
+      </div>
+
+      <div class="field">
+        <label for="rentg">Rent growth <span class="val" id="rentgVal">3.0%/yr</span></label>
+        <input type="range" id="rentg" min="0" max="10" step="0.5" value="3" aria-label="Annual rent growth">
+      </div>
+
       <div class="savebar">
         <button class="btn primary" id="saveBtn" type="button">Add to comparison</button>
         <button class="btn ghost" id="newBtn" type="button" style="display:none">Cancel</button>
@@ -311,6 +330,14 @@
         <div class="hint" style="margin-top:14px">Sale price grows at your appreciation rate; the mortgage payoff is the balance remaining at sale. Net proceeds are discounted to today at your expected market return, alongside everything you paid in. Property tax &amp; insurance are still held flat.</div>
       </div>
 
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-title">Rent vs. buy <span id="rbSpan">over 10 yrs</span></div>
+        <div class="hint" style="margin:0">Compares the net cost of owning (above) against renting a comparable place over the same horizon, in today's dollars. The break-even is the holding period where buying overtakes renting.</div>
+        <p class="pv-lead" id="rbLead"></p>
+        <div class="rb-cmp" id="rbCmp"></div>
+        <div class="stats" id="rbStats"></div>
+      </div>
+
       <div class="note">
         <b>Reading it:</b> hatched segments are money that leaves you each month (interest, tax, insurance, HOA, PMI). The solid green slice is the principal you keep. <b>True monthly cost</b> nets that equity back out — it's the closest thing to "rent equivalent" for owning. The <b>forgone return</b> stat is the opportunity cost of parking cash in the down payment instead of the market. Property tax shown is fixed-rate on today's price; in reality assessed value (and thus tax) tends to rise over time.
       </div>
@@ -333,13 +360,13 @@
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});};
   var LS='condoCompareUnits.v1';
 
-  var state={name:'',price:700000,sqft:1100,year:2018,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,hold:10,appr:3,sellcost:7,pmiRate:0.6};
+  var state={name:'',price:700000,sqft:1100,year:2018,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,hold:10,appr:3,sellcost:7,rent:3000,rentg:3,pmiRate:0.6};
   var units=[], editingId=null, seq=1;
   try{var saved=JSON.parse(localStorage.getItem(LS));
     if(saved&&saved.units){units=saved.units;seq=saved.seq||units.length+1;}}catch(e){}
   function persist(){try{localStorage.setItem(LS,JSON.stringify({units:units,seq:seq}));}catch(e){}}
 
-  var FIELDS=['name','price','sqft','year','dp','term','apr','tax','ins','hoa','esc','ret','hold','appr','sellcost','pmiRate'];
+  var FIELDS=['name','price','sqft','year','dp','term','apr','tax','ins','hoa','esc','ret','hold','appr','sellcost','rent','rentg','pmiRate'];
 
   function calc(s){
     s=s||state;
@@ -657,6 +684,69 @@
     }).join('');
   }
 
+  // ---- rent vs. buy ----
+  // PV cost of owning vs renting over N years (today's dollars, discounted at market return)
+  function buyVsRent(s,N){
+    s=s||state;
+    var loan=s.price*(1-s.dp/100);
+    var r=s.apr/100/12, n=s.term*12, d=s.ret/100/12;
+    var pi = r===0 ? loan/n : loan*r/(1-Math.pow(1+r,-n));
+    var monTax=s.price*s.tax/100/12, monIns=s.ins/12;
+    var pmiBase=loan*s.pmiRate/100/12, hasPmi=s.dp<20;
+    var H=N*12, bal=loan, pvCarry=0, pvRent=0;
+    for(var m=1;m<=H;m++){
+      var df=Math.pow(1+d,m), interest=0, principal=0;
+      if(m<=n && bal>0.005){ interest=bal*r; principal=Math.min(bal,pi-interest); bal-=principal; }
+      var pmi=(hasPmi && m<=n && bal/s.price>0.80)? pmiBase : 0;
+      var hoaM=s.hoa*Math.pow(1+s.esc/100,Math.floor((m-1)/12));
+      pvCarry+=(interest+principal+monTax+monIns+hoaM+pmi)/df;
+      pvRent+=(s.rent*Math.pow(1+s.rentg/100,Math.floor((m-1)/12)))/df;
+    }
+    var down=s.price*s.dp/100;
+    var salePrice=s.price*Math.pow(1+s.appr/100,N);
+    var netProceeds=salePrice-bal-salePrice*s.sellcost/100;
+    var buyPV=down+pvCarry-netProceeds/Math.pow(1+d,H);
+    return {buyPV:buyPV, rentPV:pvRent};
+  }
+  function breakEvenYear(s){
+    s=s||state;
+    for(var N=1;N<=40;N++){ var x=buyVsRent(s,N); if(x.buyPV<=x.rentPV) return N; }
+    return null;
+  }
+
+  function renderRentVsBuy(){
+    var N=Math.round(state.hold), yl=N===1?' yr':' yrs';
+    var x=buyVsRent(state,N), buyPV=x.buyPV, rentPV=x.rentPV, be=breakEvenYear();
+    var diff=rentPV-buyPV;                 // >0 => buying cheaper
+    var buyWins=diff>=0;
+    $('rbSpan').textContent='over '+N+yl;
+
+    var beTxt = be===null ? 'Renting stays ahead through 40 years.'
+      : be<=1 ? 'Buying wins from year one.'
+      : 'Buying breaks even around year '+be+'.';
+    $('rbLead').innerHTML='Over your '+N+'-year hold, buying costs <b>'+fmt(buyPV)+'</b> vs <b>'+fmt(rentPV)+'</b> to rent — <b>'+
+      (buyWins?'buying is cheaper by '+fmt(diff):'renting is cheaper by '+fmt(-diff))+'</b> in today’s dollars. '+beTxt;
+
+    var maxV=Math.max(buyPV,rentPV,1);
+    function bar(lbl,val,win){
+      var w=Math.max(0,val)/maxV*100;
+      return '<div class="rb-row"><span class="rb-lbl">'+lbl+'</span>'+
+        '<div class="rb-track"><div class="rb-fill" style="width:'+w.toFixed(1)+'%;background:'+(win?'var(--equity)':'var(--ink2)')+'"></div></div>'+
+        '<span class="rb-amt">'+fmtSigned(val)+'</span></div>';
+    }
+    $('rbCmp').innerHTML=bar('Buy',buyPV,buyWins)+bar('Rent',rentPV,!buyWins);
+
+    var tiles=[
+      {k:(buyWins?'Buying wins':'Renting wins'),v:fmt(Math.abs(diff)),n:'Today’s-dollar savings over the '+N+yl+' hold',cls:(buyWins?'good':'accent')},
+      {k:'Break-even hold',v:(be===null?'> 40 yrs':(be<=1?'Year 1':'Year '+be)),n:'When owning overtakes renting at these inputs',cls:''},
+      {k:'Cost to buy (PV)',v:fmtSigned(buyPV),n:'Net of resale, from the panel above',cls:''},
+      {k:'Cost to rent (PV)',v:fmt(rentPV),n:fmt(state.rent)+'/mo, +'+state.rentg+'%/yr, discounted at '+(+state.ret).toFixed(state.ret%1?1:0)+'%',cls:''}
+    ];
+    $('rbStats').innerHTML=tiles.map(function(s){
+      return '<div class="stat '+s.cls+'"><div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div></div>';
+    }).join('');
+  }
+
   function syncLabels(){
     $('priceVal').textContent=fmt(state.price);
     $('dpVal').textContent=state.dp+'% \u00b7 '+fmt(state.price*state.dp/100);
@@ -670,10 +760,12 @@
     $('holdVal').textContent=state.hold+(state.hold===1?' yr':' yrs');
     $('apprVal').textContent=state.appr.toFixed(1)+'%/yr';
     $('sellVal').textContent=(+state.sellcost).toFixed(state.sellcost%1?1:0)+'%';
+    $('rentVal').textContent=fmt(state.rent)+'/mo';
+    $('rentgVal').textContent=state.rentg.toFixed(1)+'%/yr';
     $('ppsfHint').textContent=state.sqft>0?(fmt(state.price/state.sqft)+' per sq ft'):'Enter square footage for $/sq ft';
   }
 
-  function update(){ syncLabels(); render(); renderTimeline(); renderPV(); renderNetCost(); }
+  function update(){ syncLabels(); render(); renderTimeline(); renderPV(); renderNetCost(); renderRentVsBuy(); }
 
   // ---- saved units / comparison ----
   function snapshot(){
@@ -695,6 +787,8 @@
     $('hold').value=state.hold;
     $('appr').value=state.appr;
     $('sellcost').value=state.sellcost;
+    $('rent').value=state.rent;
+    $('rentg').value=state.rentg;
     Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){
       x.classList.toggle('on',+x.dataset.term===state.term);});
   }
@@ -937,6 +1031,8 @@
   $('hold').addEventListener('input',function(e){state.hold=+e.target.value;update()});
   $('appr').addEventListener('input',function(e){state.appr=+e.target.value;update()});
   $('sellcost').addEventListener('input',function(e){state.sellcost=+e.target.value;update()});
+  $('rent').addEventListener('input',function(e){state.rent=+e.target.value||0;update()});
+  $('rentg').addEventListener('input',function(e){state.rentg=+e.target.value;update()});
   Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(b){
     b.addEventListener('click',function(){
       Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){x.classList.remove('on')});
@@ -962,7 +1058,7 @@
   });
 
   // init slider positions
-  $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp; $('hold').value=state.hold; $('appr').value=state.appr; $('sellcost').value=state.sellcost;
+  $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp; $('hold').value=state.hold; $('appr').value=state.appr; $('sellcost').value=state.sellcost; $('rentg').value=state.rentg;
   update();
   renderTable();
 })();
