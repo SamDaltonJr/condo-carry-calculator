@@ -150,6 +150,11 @@
   .tl-tip .tt-r b{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums}
   .tl-tip .tt-dot{width:8px;height:8px;border-radius:2px;flex:none}
 
+  .pv-lead{font-size:14px;line-height:1.55;margin:14px 0 2px;color:var(--ink)}
+  .pv-lead b{color:var(--brass);font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .pv-dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:baseline}
+  table.cmp-t tr.tot td{font-weight:700;border-top:2px solid var(--hair)}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -233,7 +238,25 @@
       <div class="field">
         <label for="ret">Expected market return <span class="val" id="retVal">7.0%/yr</span></label>
         <input type="range" id="ret" min="0" max="12" step="0.5" value="7" aria-label="Expected investment return">
-        <div class="hint">Used to value the forgone return on cash tied up in the down payment.</div>
+        <div class="hint">Values the forgone return on cash tied up in the down payment &mdash; and discounts future costs to today's dollars.</div>
+      </div>
+
+      <div class="field">
+        <label for="hold">Holding period <span class="val" id="holdVal">10 yrs</span></label>
+        <input type="range" id="hold" min="1" max="40" step="1" value="10" aria-label="Holding period in years">
+        <div class="hint">How long you expect to own before selling. Sets the horizon for the present-value totals below.</div>
+      </div>
+
+      <div class="field">
+        <label for="appr">Home appreciation <span class="val" id="apprVal">3.0%/yr</span></label>
+        <input type="range" id="appr" min="-5" max="10" step="0.5" value="3" aria-label="Home appreciation rate">
+        <div class="hint">Annual change in the unit's value &mdash; drives the projected sale price.</div>
+      </div>
+
+      <div class="field">
+        <label for="sellcost">Selling costs <span class="val" id="sellVal">7%</span></label>
+        <input type="range" id="sellcost" min="0" max="10" step="0.5" value="7" aria-label="Selling costs percent">
+        <div class="hint">Agent commission + closing costs at sale, as a share of the sale price (~6&ndash;8%).</div>
       </div>
 
       <div class="savebar">
@@ -271,6 +294,23 @@
         <div class="hint" style="margin-top:14px">Principal &amp; interest is fixed for the life of the loan; the bands show how its split shifts toward equity over time. HOA grows at your escalation rate and PMI drops off at 20% equity. Property tax &amp; insurance are held flat (today's figures). Hover the chart for any year's breakdown.</div>
       </div>
 
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-title">Today&rsquo;s value of future costs <span id="pvSpan">10 yrs @ 7%</span></div>
+        <div class="hint" style="margin:0">The lump sum, in today&rsquo;s dollars, that each future payment stream is worth &mdash; discounted at your expected market return. It&rsquo;s what these ongoing commitments effectively add to the condo&rsquo;s price tag.</div>
+        <p class="pv-lead" id="pvLead"></p>
+        <div id="pvTable"></div>
+        <div class="stats" id="pvStats"></div>
+      </div>
+
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-title">Net cost of ownership <span id="ncSpan">buy &rarr; sell in 10 yrs</span></div>
+        <div class="hint" style="margin:0">What owning actually costs once you sell at the end of your holding period &mdash; every dollar paid in, minus the equity and appreciation you get back at closing, in today's dollars.</div>
+        <p class="pv-lead" id="ncLead"></p>
+        <div id="ncTable"></div>
+        <div class="stats" id="ncStats"></div>
+        <div class="hint" style="margin-top:14px">Sale price grows at your appreciation rate; the mortgage payoff is the balance remaining at sale. Net proceeds are discounted to today at your expected market return, alongside everything you paid in. Property tax &amp; insurance are still held flat.</div>
+      </div>
+
       <div class="note">
         <b>Reading it:</b> hatched segments are money that leaves you each month (interest, tax, insurance, HOA, PMI). The solid green slice is the principal you keep. <b>True monthly cost</b> nets that equity back out — it's the closest thing to "rent equivalent" for owning. The <b>forgone return</b> stat is the opportunity cost of parking cash in the down payment instead of the market. Property tax shown is fixed-rate on today's price; in reality assessed value (and thus tax) tends to rise over time.
       </div>
@@ -287,18 +327,19 @@
 (function(){
   var $=function(id){return document.getElementById(id)};
   var fmt=function(n){return '$'+Math.round(n).toLocaleString('en-US')};
+  var fmtSigned=function(n){return (n<0?'−':'')+'$'+Math.round(Math.abs(n)).toLocaleString('en-US')};
   var pct=function(n,d){return (100*n/d).toFixed(0)+'%'};
   var esc=function(s){return String(s).replace(/[&<>"']/g,function(ch){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});};
   var LS='condoCompareUnits.v1';
 
-  var state={name:'',price:700000,sqft:1100,year:2018,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,pmiRate:0.6};
+  var state={name:'',price:700000,sqft:1100,year:2018,dp:20,term:30,apr:6.5,tax:2.1,ins:1800,hoa:500,esc:4,ret:7,hold:10,appr:3,sellcost:7,pmiRate:0.6};
   var units=[], editingId=null, seq=1;
   try{var saved=JSON.parse(localStorage.getItem(LS));
     if(saved&&saved.units){units=saved.units;seq=saved.seq||units.length+1;}}catch(e){}
   function persist(){try{localStorage.setItem(LS,JSON.stringify({units:units,seq:seq}));}catch(e){}}
 
-  var FIELDS=['name','price','sqft','year','dp','term','apr','tax','ins','hoa','esc','ret','pmiRate'];
+  var FIELDS=['name','price','sqft','year','dp','term','apr','tax','ins','hoa','esc','ret','hold','appr','sellcost','pmiRate'];
 
   function calc(s){
     s=s||state;
@@ -518,6 +559,104 @@
   }
   function tlLeave(){ if($('tlCursor'))$('tlCursor').style.opacity='0'; $('tlTip').style.opacity='0'; }
 
+  // ---- present value of future costs ----
+  function presentValue(s){
+    s=s||state;
+    var loan=s.price*(1-s.dp/100);
+    var r=s.apr/100/12, n=s.term*12;
+    var pi = r===0 ? loan/n : loan*r/(1-Math.pow(1+r,-n));
+    var monTax=s.price*s.tax/100/12, monIns=s.ins/12;
+    var pmiBase=loan*s.pmiRate/100/12, hasPmi=s.dp<20;
+    var d=s.ret/100/12;                 // monthly discount rate
+    var H=Math.round(s.hold)*12, bal=loan;
+    var pv={prin:0,int:0,tax:0,ins:0,hoa:0,pmi:0};
+    var nom={prin:0,int:0,tax:0,ins:0,hoa:0,pmi:0};
+    for(var m=1;m<=H;m++){
+      var df=Math.pow(1+d,m);
+      var interest=0, principal=0;
+      if(m<=n && bal>0.005){ interest=bal*r; principal=Math.min(bal,pi-interest); bal-=principal; }
+      var pmi=(hasPmi && m<=n && bal/s.price>0.80)? pmiBase : 0;
+      var hoaM=s.hoa*Math.pow(1+s.esc/100,Math.floor((m-1)/12));
+      nom.int+=interest; nom.prin+=principal; nom.tax+=monTax; nom.ins+=monIns; nom.hoa+=hoaM; nom.pmi+=pmi;
+      pv.int+=interest/df; pv.prin+=principal/df; pv.tax+=monTax/df; pv.ins+=monIns/df; pv.hoa+=hoaM/df; pv.pmi+=pmi/df;
+    }
+    pv.sunk=pv.int+pv.tax+pv.ins+pv.hoa+pv.pmi; pv.all=pv.sunk+pv.prin;
+    nom.sunk=nom.int+nom.tax+nom.ins+nom.hoa+nom.pmi; nom.all=nom.sunk+nom.prin;
+    return {pv:pv,nom:nom,years:Math.round(s.hold),disc:s.ret,hasPmi:hasPmi,endBal:bal};
+  }
+
+  function renderPV(){
+    var v=presentValue(), pv=v.pv, nom=v.nom, yrs=v.years, yl=yrs===1?' yr':' yrs';
+    $('pvSpan').textContent=yrs+yl+' @ '+(+v.disc).toFixed(v.disc%1?1:0)+'%';
+    $('pvLead').innerHTML='Committing to <b>'+fmt(state.hoa)+'/mo</b> in HOA dues'+
+      (state.esc>0?(' (rising '+state.esc+'%/yr)'):'')+' for '+yrs+(yrs===1?' year':' years')+
+      ' is worth <b>'+fmt(pv.hoa)+'</b> in today’s dollars — effectively that much added to the purchase price.';
+
+    var rows=[
+      {nm:'Mortgage interest',col:'var(--interest)',pv:pv.int,nom:nom.int},
+      {nm:'Property tax',col:'var(--tax)',pv:pv.tax,nom:nom.tax},
+      {nm:'Insurance',col:'var(--ins)',pv:pv.ins,nom:nom.ins},
+      {nm:'HOA dues',col:'var(--hoa)',pv:pv.hoa,nom:nom.hoa}
+    ];
+    if(v.hasPmi) rows.push({nm:'PMI',col:'var(--pmi)',pv:pv.pmi,nom:nom.pmi});
+    rows=rows.filter(function(r){return r.pv>0.5;});
+    var h='<div class="tablewrap"><table class="cmp-t"><thead><tr>'+
+      '<th>Cost</th><th>Today’s value</th><th>Total paid</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      h+='<tr><td class="nm"><span class="pv-dot" style="background:'+r.col+'"></span>'+r.nm+'</td>'+
+         '<td>'+fmt(r.pv)+'</td><td>'+fmt(r.nom)+'</td></tr>';
+    });
+    h+='<tr class="tot"><td class="nm">Costs that leave you</td><td>'+fmt(pv.sunk)+'</td><td>'+fmt(nom.sunk)+'</td></tr>';
+    h+='</tbody></table></div>';
+    $('pvTable').innerHTML=h;
+
+    var tiles=[
+      {k:'HOA in today’s $',v:fmt(pv.hoa),n:fmt(state.hoa)+'/mo over '+yrs+yl+', discounted at '+(+v.disc).toFixed(v.disc%1?1:0)+'%',cls:'accent'},
+      {k:'All sunk costs (today’s $)',v:fmt(pv.sunk),n:'Lump-sum equivalent of every dollar that leaves you',cls:''},
+      {k:'Same costs, undiscounted',v:fmt(nom.sunk),n:'Nominal total over '+yrs+yl+' — the gap is the time value of money',cls:''}
+    ];
+    $('pvStats').innerHTML=tiles.map(function(s){
+      return '<div class="stat '+s.cls+'"><div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div></div>';
+    }).join('');
+  }
+
+  // ---- net cost of ownership (buy, hold, sell) ----
+  function renderNetCost(){
+    var v=presentValue(), N=v.years, d=state.ret/100/12, months=N*12;
+    var down=state.price*state.dp/100;
+    var salePrice=state.price*Math.pow(1+state.appr/100,N);
+    var payoff=v.endBal;
+    var sellCost=salePrice*state.sellcost/100;
+    var netProceeds=salePrice-payoff-sellCost;
+    var pvProceeds=netProceeds/Math.pow(1+d,months);
+    var netCostPV=down+v.pv.all-pvProceeds;
+    var nominalPaid=down+v.nom.all;
+    var monthlyEquiv=(d===0)? netCostPV/months : netCostPV*d/(1-Math.pow(1+d,-months));
+    var yl=N===1?' yr':' yrs', pctTxt=(+state.sellcost).toFixed(state.sellcost%1?1:0);
+    $('ncSpan').textContent='buy → sell in '+N+yl;
+    if(netCostPV>=0)
+      $('ncLead').innerHTML='Owning for '+N+(N===1?' year':' years')+' and selling then costs about <b>'+fmt(netCostPV)+'</b> in today’s dollars — an effective <b>'+fmtSigned(monthlyEquiv)+'/mo</b> net of resale.';
+    else
+      $('ncLead').innerHTML='Owning for '+N+(N===1?' year':' years')+' and selling then comes out <b>ahead by '+fmt(-netCostPV)+'</b> in today’s dollars — an effective <b>'+fmtSigned(monthlyEquiv)+'/mo</b> after resale.';
+
+    $('ncTable').innerHTML='<div class="tablewrap"><table class="cmp-t"><thead><tr><th>At sale · year '+N+'</th><th>Amount</th></tr></thead><tbody>'+
+      '<tr><td class="nm">Projected sale price</td><td>'+fmt(salePrice)+'</td></tr>'+
+      '<tr><td class="nm">Mortgage payoff</td><td>−'+fmt(payoff)+'</td></tr>'+
+      '<tr><td class="nm">Selling costs ('+pctTxt+'%)</td><td>−'+fmt(sellCost)+'</td></tr>'+
+      '<tr class="tot"><td class="nm">Net proceeds at closing</td><td>'+fmt(netProceeds)+'</td></tr>'+
+      '</tbody></table></div>';
+
+    var tiles=[
+      {k:'Net cost to own ('+N+yl+')',v:fmtSigned(netCostPV),n:'Today’s-dollar cost of buying, holding & selling',cls:'accent'},
+      {k:'Effective cost',v:fmtSigned(monthlyEquiv)+'/mo',n:'Level monthly equivalent, net of resale — your true “rent” to own',cls:''},
+      {k:'Net proceeds at sale',v:fmt(netProceeds),n:'Cash in hand after payoff & selling costs (year '+N+', nominal)',cls:'good'},
+      {k:'Total paid in',v:fmt(nominalPaid),n:'Down payment + all carry over '+N+yl+' (before resale, nominal)',cls:''}
+    ];
+    $('ncStats').innerHTML=tiles.map(function(s){
+      return '<div class="stat '+s.cls+'"><div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div></div>';
+    }).join('');
+  }
+
   function syncLabels(){
     $('priceVal').textContent=fmt(state.price);
     $('dpVal').textContent=state.dp+'% \u00b7 '+fmt(state.price*state.dp/100);
@@ -528,10 +667,13 @@
     $('hoaPerVal').textContent=fmt(state.hoa)+'/mo';
     $('escVal').textContent=state.esc+'%/yr';
     $('retVal').textContent=state.ret.toFixed(1)+'%/yr';
+    $('holdVal').textContent=state.hold+(state.hold===1?' yr':' yrs');
+    $('apprVal').textContent=state.appr.toFixed(1)+'%/yr';
+    $('sellVal').textContent=(+state.sellcost).toFixed(state.sellcost%1?1:0)+'%';
     $('ppsfHint').textContent=state.sqft>0?(fmt(state.price/state.sqft)+' per sq ft'):'Enter square footage for $/sq ft';
   }
 
-  function update(){ syncLabels(); render(); renderTimeline(); }
+  function update(){ syncLabels(); render(); renderTimeline(); renderPV(); renderNetCost(); }
 
   // ---- saved units / comparison ----
   function snapshot(){
@@ -550,6 +692,9 @@
     $('hoa').value=state.hoa;
     $('esc').value=state.esc;
     $('ret').value=state.ret;
+    $('hold').value=state.hold;
+    $('appr').value=state.appr;
+    $('sellcost').value=state.sellcost;
     Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){
       x.classList.toggle('on',+x.dataset.term===state.term);});
   }
@@ -789,6 +934,9 @@
   $('hoa').addEventListener('input',function(e){state.hoa=+e.target.value||0;update()});
   $('esc').addEventListener('input',function(e){state.esc=+e.target.value;update()});
   $('ret').addEventListener('input',function(e){state.ret=+e.target.value;update()});
+  $('hold').addEventListener('input',function(e){state.hold=+e.target.value;update()});
+  $('appr').addEventListener('input',function(e){state.appr=+e.target.value;update()});
+  $('sellcost').addEventListener('input',function(e){state.sellcost=+e.target.value;update()});
   Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(b){
     b.addEventListener('click',function(){
       Array.prototype.forEach.call(document.querySelectorAll('#termSeg button'),function(x){x.classList.remove('on')});
@@ -814,7 +962,7 @@
   });
 
   // init slider positions
-  $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp;
+  $('apr').value=state.apr; $('tax').value=state.tax; $('esc').value=state.esc; $('ret').value=state.ret; $('dpR').value=state.dp; $('hold').value=state.hold; $('appr').value=state.appr; $('sellcost').value=state.sellcost;
   update();
   renderTable();
 })();
