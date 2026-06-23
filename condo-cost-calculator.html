@@ -82,6 +82,17 @@
   .hero .sub{font-size:13px;color:#9fb0c4}
   .hero .sub b{color:#fff;font-family:var(--mono);font-variant-numeric:tabular-nums}
 
+  /* All-in cost banner */
+  .allin-hero{border:2px solid var(--brass);border-radius:4px;background:var(--surface);padding:22px 22px 18px;margin-bottom:18px}
+  .allin-hero .lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--brass);font-weight:700}
+  .allin-hero .big{font-family:var(--mono);font-weight:700;font-size:clamp(38px,8vw,56px);letter-spacing:-.02em;
+    line-height:1;margin:6px 0 2px;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .allin-hero .sub{font-size:13px;color:var(--ink2);line-height:1.5}
+  .allin-hero .sub b{color:var(--ink);font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .allin-hero .breakdown{display:flex;gap:18px;margin-top:12px;flex-wrap:wrap}
+  .allin-hero .bk{font-size:12px;color:var(--ink2)}
+  .allin-hero .bk b{display:block;font-family:var(--mono);font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+
   /* Composition bar */
   .barwrap{margin:18px 0 8px}
   .bar{display:flex;width:100%;height:30px;border-radius:3px;overflow:hidden;border:1px solid var(--hair)}
@@ -288,6 +299,13 @@
 
     <!-- RESULTS -->
     <section aria-label="Results">
+      <div class="allin-hero" id="allinHero" style="display:none">
+        <div class="lbl">All-in cost &middot; today&rsquo;s dollars</div>
+        <div class="big" id="allinBig">—</div>
+        <div class="sub" id="allinSub"></div>
+        <div class="breakdown" id="allinBreakdown"></div>
+      </div>
+
       <div class="hero">
         <div class="lbl">Total monthly carry</div>
         <div class="big" id="totalOut">$0</div>
@@ -682,6 +700,20 @@
     $('ncStats').innerHTML=tiles.map(function(s){
       return '<div class="stat '+s.cls+'"><div class="k">'+s.k+'</div><div class="v">'+s.v+'</div><div class="n">'+s.n+'</div></div>';
     }).join('');
+
+    // All-in cost banner at the top of results
+    var allin=$('allinHero');
+    allin.style.display='';
+    $('allinBig').textContent=netCostPV>=0 ? fmt(netCostPV) : '−'+fmt(-netCostPV);
+    $('allinSub').innerHTML=netCostPV>=0
+      ? 'This transaction will cost you <b>'+fmt(netCostPV)+'</b> in today&rsquo;s dollars &mdash; every dollar out of your pocket, discounted at '+state.ret+'%, net of what you get back at sale after '+N+yl+'.'
+      : 'This transaction comes out <b>ahead by '+fmt(-netCostPV)+'</b> in today&rsquo;s dollars &mdash; appreciation and equity returned at sale exceed all costs, discounted at '+state.ret+'% over '+N+yl+'.';
+    $('allinBreakdown').innerHTML=
+      '<div class="bk"><b>'+fmt(down)+'</b>Down payment</div>'+
+      '<div class="bk" style="color:var(--ink2)">+</div>'+
+      '<div class="bk"><b>'+fmt(v.pv.all)+'</b>PV of carrying costs</div>'+
+      '<div class="bk" style="color:var(--ink2)">&minus;</div>'+
+      '<div class="bk"><b>'+fmt(pvProceeds)+'</b>PV of sale proceeds</div>';
   }
 
   // ---- rent vs. buy ----
